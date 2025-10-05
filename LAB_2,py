@@ -1,0 +1,158 @@
+import heapq
+import string
+
+def preprocess_text(text):
+    """
+    Function to preprocess a document:
+    1. Convert to lowercase
+    2. Remove punctuation
+    3. Split into sentences
+    """
+    text = text.lower()
+    text = text.translate(str.maketrans('', '', string.punctuation))
+    sentences = [s.strip() for s in text.split('.') if s.strip()]
+    return sentences
+
+
+def levenshtein_distance(s1, s2):
+    """
+    Calculates the Levenshtein edit distance between two strings.
+    This measures how many single-character edits (insertions,
+    deletions, substitutions) are required to convert s1 into s2.
+    """
+    m, n = len(s1), len(s2)
+    dp = [[0] * (n + 1) for _ in range(m + 1)]
+
+    for i in range(m + 1):
+        dp[i][0] = i
+    for j in range(n + 1):
+        dp[0][j] = j
+
+    for i in range(1, m + 1):
+        for j in range(1, n + 1):
+            if s1[i - 1] == s2[j - 1]:
+                dp[i][j] = dp[i - 1][j - 1]
+            else:
+                dp[i][j] = 1 + min(dp[i - 1][j],     # deletion
+                                   dp[i][j - 1],     # insertion
+                                   dp[i - 1][j - 1]) # substitution
+    return dp[m][n]
+
+
+class State:
+    """
+    Represents a state in the A* search space.
+    Each state corresponds to indices (i, j) in the two documents
+    and the accumulated cost g (edit distance so far).
+    """
+    def _init_(self, i, j, g, parent=None, action=None):
+        self.i = i
+        self.j = j
+        self.g = g
+        self.parent = parent
+        self.action = action  # "align", "skip_d1", or "skip_d2"
+
+    def _lt_(self, other):
+        return self.g < other.g
+
+
+def heuristic(i, j, len_d1, len_d2):
+    """
+    Simple admissible heuristic:
+    Estimates remaining cost based on the number of remaining sentences.
+    Each unaligned sentence is assumed to cost at least 1 unit.
+    """
+    remaining = abs(len_d1 - i) + abs(len_d2 - j)
+    return remaining
+
+
+def reconstruct_alignment(state, d1, d2):
+    """
+    Reconstructs the aligned sentence pairs from the goal state
+    by backtracking through parent states.
+    """
+    alignment = []
+    while state and state.parent:
+        if state.action == "align":
+            alignment.append((d1[state.parent.i], d2[state.parent.j], state.g - state.parent.g))
+        state = state.parent
+    alignment.reverse()
+    return alignment
+
+
+def a_star_plagiarism_detection(d1, d2):
+    """
+    Main A* search algorithm for plagiarism detection.
+    Aligns sentences between two preprocessed document lists.
+    """
+    len_d1, len_d2 = len(d1), len(d2)
+    start = State(0, 0, 0)
+    goal = (len_d1, len_d2)
+
+    open_list = []
+    heapq.heappush(open_list, (0, start))
+    closed = set()
+
+    while open_list:
+        f, current = heapq.heappop(open_list)
+
+        # Goal check
+        if (current.i, current.j) == goal:
+            return reconstruct_alignment(current, d1, d2)
+
+        closed.add((current.i, current.j))
+
+        # --- Possible actions from current state ---
+        # 1. Align sentences
+        if current.i < len_d1 and current.j < len_d2:
+            cost = levenshtein_distance(d1[current.i], d2[current.j])
+            new_state = State(current.i + 1, current.j + 1, current.g + cost, current, "align")
+            if (new_state.i, new_state.j) not in closed:
+                f_score = new_state.g + heuristic(new_state.i, new_state.j, len_d1, len_d2)
+                heapq.heappush(open_list, (f_score, new_state))
+
+        # 2. Skip sentence from D1
+        if current.i < len_d1:
+            new_state = State(current.i + 1, current.j, current.g + 1, current, "skip_d1")
+            if (new_state.i, new_state.j) not in closed:
+                f_score = new_state.g + heuristic(new_state.i, new_state.j, len_d1, len_d2)
+                heapq.heappush(open_list, (f_score, new_state))
+
+        # 3. Skip sentence from D2
+        if current.j < len_d2:
+            new_state = State(current.i, current.j + 1, current.g + 1, current, "skip_d2")
+            if (new_state.i, new_state.j) not in closed:
+                f_score = new_state.g + heuristic(new_state.i, new_state.j, len_d1, len_d2)
+                heapq.heappush(open_list, (f_score, new_state))
+
+    return []
+ 
+
+if _name_ == "_main_":
+    doc1 = """
+    Artificial intelligence is a branch of computer science.
+    It aims to create systems that can learn and reason.
+    Plagiarism detection is one of its applications.
+    """
+
+    doc2 = """
+    Artificial intelligence belongs to computer science.
+    It focuses on building systems that think and learn.
+    Detecting plagiarism is an important AI application.
+    """
+
+    # Step 1: Preprocess both documents
+    D1 = preprocess_text(doc1)
+    D2 = preprocess_text(doc2)
+
+    # Step 2: Run A* plagiarism detection
+    aligned = a_star_plagiarism_detection(D1, D2)
+
+    # Step 3: Print aligned sentences and their edit distances
+    print("\n--- Potentially Similar Sentences ---\n")
+    for s1, s2, cost in aligned:
+        print(f"Doc1: {s1}")
+        print(f"Doc2: {s2}")
+        print(f"Edit Distance: {cost}\n")
+
+    print("Analysis complete. Sentences with low edit distance may indicate plagiarism.")
